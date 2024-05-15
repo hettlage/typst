@@ -27,7 +27,10 @@ pub fn deferred_image(image: Image) -> Deferred<EncodedImage> {
 
             EncodedImage::Raster { data, filter, has_color, width, height, icc, alpha }
         }
-        ImageKind::Svg(svg) => EncodedImage::Svg(encode_svg(svg)),
+        ImageKind::Svg(svg) => {
+            let (chunk, id) = encode_svg(svg);
+            EncodedImage::Svg(chunk, id)
+        }
     })
 }
 
@@ -96,12 +99,12 @@ pub(crate) fn write_images(ctx: &mut PdfContext) {
                     }
                 }
             }
-            EncodedImage::Svg(chunk) => {
+            EncodedImage::Svg(chunk, id) => {
                 let mut map = HashMap::new();
                 chunk.renumber_into(&mut ctx.pdf, |old| {
                     *map.entry(old).or_insert_with(|| ctx.alloc.bump())
                 });
-                ctx.image_refs.push(map[&Ref::new(1)]);
+                ctx.image_refs.push(map[id]);
             }
         }
     }
@@ -147,23 +150,8 @@ fn encode_alpha(raster: &RasterImage) -> (Vec<u8>, Filter) {
 /// Encode an SVG into a chunk of PDF objects.
 ///
 /// The main XObject will have ID 1.
-fn encode_svg(svg: &SvgImage) -> Chunk {
-    let mut chunk = Chunk::new();
-
-    // Safety: We do not keep any references to tree nodes beyond the
-    // scope of `with`.
-    unsafe {
-        svg.with(|tree| {
-            svg2pdf::convert_tree_into(
-                tree,
-                svg2pdf::Options::default(),
-                &mut chunk,
-                Ref::new(1),
-            );
-        });
-    }
-
-    chunk
+fn encode_svg(svg: &SvgImage) -> (Chunk, Ref) {
+    svg2pdf::to_chunk(svg.tree(), svg2pdf::ConversionOptions::default(), svg.fontdb())
 }
 
 /// A pre-encoded image.
@@ -188,5 +176,5 @@ pub enum EncodedImage {
     /// A vector graphic.
     ///
     /// The chunk is the SVG converted to PDF objects.
-    Svg(Chunk),
+    Svg(Chunk, Ref),
 }
